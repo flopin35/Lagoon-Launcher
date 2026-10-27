@@ -112,6 +112,8 @@ class AppRepository(private val context: Context) {
         val canvas = Canvas(bitmap)
         val drawable = info.getBadgedIcon(0)
         if (drawable is AdaptiveIconDrawable) {
+            // A few apps ship a transparent background layer; give them a solid base.
+            canvas.drawColor(0xFFF2FBF9.toInt())
             val bleed = size / 4
             listOfNotNull(drawable.background, drawable.foreground).forEach { layer ->
                 layer.setBounds(-bleed, -bleed, size + bleed, size + bleed)

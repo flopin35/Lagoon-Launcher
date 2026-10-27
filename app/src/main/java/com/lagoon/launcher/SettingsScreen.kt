@@ -131,15 +131,45 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
                             }
                         }
                     }
-                    if (prefs.wallpaper == "custom") {
-                        Text(
-                            "Change photo",
-                            color = accent,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { picker.launch("image/*") }.padding(4.dp),
-                        )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (prefs.wallpaper != "system") {
+                            Chip("Use on lock screen too", false, accent, {
+                                scope.launch {
+                                    val ok = withContext(Dispatchers.IO) { applyToLockScreen(context, prefs.wallpaper) }
+                                    Toast.makeText(
+                                        context,
+                                        if (ok) "Lock screen wallpaper updated" else "Your device didn't allow changing the lock screen",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                            })
+                        }
+                        if (prefs.wallpaper == "custom") {
+                            Chip("Change photo", false, accent, { picker.launch("image/*") })
+                        }
                     }
+                }
+
+                Section("Clock", accent) {
+                    Label("Style")
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        clockStyles.forEach { style ->
+                            Chip(style.name, prefs.clockStyle == style.id, accent, { prefs.clockStyle = style.id })
+                        }
+                    }
+                    Label("Size")
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Chip("Small", prefs.clockSize == "small", accent, { prefs.clockSize = "small" })
+                        Chip("Medium", prefs.clockSize == "medium", accent, { prefs.clockSize = "medium" })
+                        Chip("Large", prefs.clockSize == "large", accent, { prefs.clockSize = "large" })
+                    }
+                    Label("Position")
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Chip("Left", prefs.clockAlign == "start", accent, { prefs.clockAlign = "start" })
+                        Chip("Centre", prefs.clockAlign == "center", accent, { prefs.clockAlign = "center" })
+                    }
+                    SwitchRow("Show clock", "Time, date and greeting on the home screen", prefs.showClock, accent) { prefs.showClock = it }
+                    SwitchRow("24-hour time", null, prefs.use24h, accent) { prefs.use24h = it }
                 }
 
                 Section("Accent colour", accent) {
@@ -228,8 +258,7 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
                         )
                         StepButton("+", prefs.columns < 9) { prefs.columns = prefs.columns + 1 }
                     }
-                    SwitchRow("Show clock", "Time, date and greeting on the home screen", prefs.showClock, accent) { prefs.showClock = it }
-                    SwitchRow("24-hour time", null, prefs.use24h, accent) { prefs.use24h = it }
+                    SwitchRow("Show dock", "The floating row of favourite apps", prefs.showDock, accent) { prefs.showDock = it }
                 }
 
                 Section("Motion", accent) {
@@ -284,7 +313,7 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text("Lagoon 1.0", color = Lagoon.Muted, fontFamily = Outfit, fontSize = 14.sp)
+                    Text("Lagoon 1.0.1",color = Lagoon.Muted, fontFamily = Outfit, fontSize = 14.sp)
                     Text(
                         if (isDefault) "Lagoon is your home screen · ${apps.size} apps" else "${apps.size} apps installed",
                         color = Lagoon.Muted.copy(alpha = 0.7f),

@@ -72,13 +72,51 @@ val SquircleShape = GenericShape { size, _ ->
     close()
 }
 
+/** A closed curve traced from a polar radius function r(t) in 0..1 of the half-size. */
+private fun polarShape(steps: Int = 120, radius: (Double) -> Double) = GenericShape { size, _ ->
+    val cx = size.width / 2.0
+    val cy = size.height / 2.0
+    for (i in 0..steps) {
+        val t = 2 * PI * i / steps
+        val r = radius(t)
+        val x = (cx + cx * r * cos(t)).toFloat()
+        val y = (cy + cy * r * sin(t)).toFloat()
+        if (i == 0) moveTo(x, y) else lineTo(x, y)
+    }
+    close()
+}
+
+val HexagonShape = GenericShape { size, _ ->
+    // Flat-topped hexagon with softened proportions so icons still fill it.
+    val w = size.width
+    val h = size.height
+    moveTo(w * 0.25f, 0f)
+    lineTo(w * 0.75f, 0f)
+    lineTo(w, h * 0.5f)
+    lineTo(w * 0.75f, h)
+    lineTo(w * 0.25f, h)
+    lineTo(0f, h * 0.5f)
+    close()
+}
+
+// Eight soft petals, like a scalloped seal.
+val FlowerShape = polarShape { t -> 0.92 + 0.08 * cos(8 * t) }
+
+// Four rounded lobes.
+val CloverShape = polarShape { t -> 0.86 + 0.14 * abs(cos(2 * t)).pow(0.6) }
+
 class IconShapeOption(val id: String, val name: String, val shape: Shape)
 
 val iconShapes = listOf(
     IconShapeOption("squircle", "Squircle", SquircleShape),
     IconShapeOption("circle", "Circle", CircleShape),
     IconShapeOption("rounded", "Rounded", RoundedCornerShape(24)),
+    IconShapeOption("square", "Square", RoundedCornerShape(10)),
     IconShapeOption("pebble", "Pebble", RoundedCornerShape(50, 50, 50, 16)),
+    IconShapeOption("teardrop", "Teardrop", RoundedCornerShape(50, 50, 50, 4)),
+    IconShapeOption("hexagon", "Hexagon", HexagonShape),
+    IconShapeOption("flower", "Flower", FlowerShape),
+    IconShapeOption("clover", "Clover", CloverShape),
 )
 
 fun iconShape(id: String): Shape = (iconShapes.firstOrNull { it.id == id } ?: iconShapes.first()).shape

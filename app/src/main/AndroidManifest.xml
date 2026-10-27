@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
     <!-- Lets the app menu start the system uninstall dialog -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <!-- Lets settings apply the Lagoon wallpaper to the lock screen -->
+    <uses-permission android:name="android.permission.SET_WALLPAPER" />
 
     <queries>
         <intent>

@@ -21,12 +21,28 @@ class LauncherPrefs(context: Context) {
     var showLabels by bool("show_labels", true)
     var columns by int("columns", 6)
     var showClock by bool("show_clock", true)
+    var clockStyle by string("clock_style", "analog")
+    var clockSize by string("clock_size", "large")
+    var clockAlign by string("clock_align", "start")
     var use24h by bool("use_24h", true)
+    var showDock by bool("show_dock", true)
+    var renames by list("renames")
     var motion by string("motion", "gentle")
     var seeded by bool("seeded", false)
     var dock by list("dock")
     var home by list("home")
     var hidden by list("hidden")
+
+    /** Custom app names, keyed by app key. A blank name restores the app's own label. */
+    fun renameMap(): Map<String, String> = renames.mapNotNull { entry ->
+        val parts = entry.split(RENAME_SEPARATOR)
+        if (parts.size == 2) parts[0] to parts[1] else null
+    }.toMap()
+
+    fun rename(key: String, name: String?) {
+        val others = renames.filterNot { it.startsWith(key + RENAME_SEPARATOR) }
+        renames = if (name.isNullOrBlank()) others else others + (key + RENAME_SEPARATOR + name.trim())
+    }
 
     private fun string(key: String, default: String) =
         pref({ sp.getString(key, default) ?: default }) { sp.edit().putString(key, it).apply() }
@@ -51,6 +67,8 @@ class LauncherPrefs(context: Context) {
         }
     }
 }
+
+private const val RENAME_SEPARATOR = '\u0001'
 
 fun List<String>.toggled(key: String, limit: Int = Int.MAX_VALUE): List<String> = when {
     key in this -> this - key

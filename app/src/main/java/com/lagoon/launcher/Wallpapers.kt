@@ -1,5 +1,6 @@
 package com.lagoon.launcher
 
+import android.app.WallpaperManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -16,6 +17,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -142,6 +148,31 @@ object CustomWallpaper {
     fun load(context: Context): ImageBitmap? =
         runCatching { BitmapFactory.decodeFile(file(context).path)?.asImageBitmap() }.getOrNull()
 }
+
+/**
+ * Renders the chosen Lagoon wallpaper to a bitmap and hands it to the system for the
+ * lock screen. Returns false when there is nothing to apply or the system refuses it.
+ */
+fun applyToLockScreen(context: Context, id: String): Boolean = runCatching {
+    val dm = context.resources.displayMetrics
+    val bitmap: Bitmap = when (id) {
+        "custom" -> BitmapFactory.decodeFile(File(context.filesDir, "wallpaper.jpg").path) ?: return false
+        "system" -> return false
+        else -> {
+            val preset = presetById(id) ?: wallpaperPresets.first()
+            val image = ImageBitmap(dm.widthPixels, dm.heightPixels)
+            CanvasDrawScope().draw(
+                Density(dm.density),
+                LayoutDirection.Ltr,
+                androidx.compose.ui.graphics.Canvas(image),
+                Size(dm.widthPixels.toFloat(), dm.heightPixels.toFloat()),
+            ) { preset.paint(this) }
+            image.asAndroidBitmap()
+        }
+    }
+    WallpaperManager.getInstance(context).setBitmap(bitmap, null, true, WallpaperManager.FLAG_LOCK)
+    true
+}.getOrDefault(false)
 
 @Composable
 fun WallpaperLayer(id: String, version: Int, modifier: Modifier = Modifier) {

@@ -60,7 +60,10 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Create
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Info
@@ -109,6 +112,7 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -120,6 +124,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -133,7 +138,7 @@ import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
 @Composable
-fun LagoonApp(repo: AppRepository, prefs: LauncherPrefs, homeEvents: Int, resumeTicks: Int) {
+fun LagoonApp(repo: AppRepository, prefs: LauncherPrefs, homeEvents: Int, resumeTicks: Int, appVisible: Boolean) {
     val accent = accentColor(prefs.accent)
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -146,12 +151,19 @@ fun LagoonApp(repo: AppRepository, prefs: LauncherPrefs, homeEvents: Int, resume
             onSurface = Lagoon.Text,
         )
     ) {
-        LauncherRoot(repo, prefs, accent, homeEvents, resumeTicks)
+        LauncherRoot(repo, prefs, accent, homeEvents, resumeTicks, appVisible)
     }
 }
 
 @Composable
-private fun LauncherRoot(repo: AppRepository, prefs: LauncherPrefs, accent: Color, homeEvents: Int, resumeTicks: Int) {
+private fun LauncherRoot(
+    repo: AppRepository,
+    prefs: LauncherPrefs,
+    accent: Color,
+    homeEvents: Int,
+    resumeTicks: Int,
+    appVisible: Boolean,
+) {
     val context = LocalContext.current
     val view = LocalView.current
     val density = LocalDensity.current
@@ -169,8 +181,15 @@ private fun LauncherRoot(repo: AppRepository, prefs: LauncherPrefs, accent: Colo
     val drawerOpen by remember { derivedStateOf { progress > 0.5f } }
 
     val hidden = remember(prefs.hidden) { prefs.hidden.toSet() }
-    val visibleApps = remember(repo.apps, hidden) { repo.apps.filter { it.key !in hidden } }
-    val byKey = remember(repo.apps) { repo.apps.associateBy { it.key } }
+    val renames = remember(prefs.renames) { prefs.renameMap() }
+    val allApps = remember(repo.apps, renames) {
+        if (renames.isEmpty()) repo.apps
+        else repo.apps
+            .map { app -> renames[app.key]?.let { AppEntry(app.key, it, app.component, app.user, app.icon) } ?: app }
+            .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label })
+    }
+    val visibleApps = remember(allApps, hidden) { allApps.filter { it.key !in hidden } }
+    val byKey = remember(allApps) { allApps.associateBy { it.key } }
     val dockApps = prefs.dock.mapNotNull { byKey[it] }.filter { it.key !in hidden }
     val homeApps = prefs.home.mapNotNull { byKey[it] }.filter { it.key !in hidden }
 
@@ -344,7 +363,7 @@ private fun LauncherRoot(repo: AppRepository, prefs: LauncherPrefs, accent: Colo
                 homeApps = homeApps,
                 dockApps = dockApps,
                 light = lightWallpaper,
-                resumeTicks = resumeTicks,
+                clockActive = appVisible && !drawerOpen && !settingsOpen,
                 onLaunch = ::openApp,
                 onMenu = { menuApp = it },
                 onOpenSettings = { settingsOpen = true },
@@ -388,10 +407,18 @@ private fun LauncherRoot(repo: AppRepository, prefs: LauncherPrefs, accent: Colo
                 enter = slideInHorizontally(motionSpec(prefs.motion)) { it / 3 } + fadeIn(motionSpec(prefs.motion)),
                 exit = slideOutHorizontally(motionSpec(prefs.motion)) { it / 3 } + fadeOut(motionSpec(prefs.motion)),
             ) {
-                SettingsScreen(prefs, repo.apps, accent, resumeTicks, onClose = { settingsOpen = false })
+                SettingsScreen(prefs, allApps, accent, resumeTicks, onClose = { settingsOpen = false })
             }
         }
     }
+}
+
+/** The chosen column count, capped so icons never touch on narrow screens. */
+@Composable
+private fun fittedColumns(prefs: LauncherPrefs, sidePadding: Int): Int {
+    val width = LocalConfiguration.current.screenWidthDp - sidePadding * 2
+    val fit = width / (prefs.iconSize + 30)
+    return prefs.columns.coerceAtMost(fit).coerceAtLeast(3)
 }
 
 @Composable
@@ -401,7 +428,7 @@ private fun HomeScreen(
     homeApps: List<AppEntry>,
     dockApps: List<AppEntry>,
     light: Boolean,
-    resumeTicks: Int,
+    clockActive: Boolean,
     onLaunch: (AppEntry, Rect?) -> Unit,
     onMenu: (AppEntry) -> Unit,
     onOpenSettings: () -> Unit,
@@ -416,12 +443,18 @@ private fun HomeScreen(
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .padding(horizontal = 36.dp, vertical = 20.dp)
         ) {
-            if (prefs.showClock) Clock(content, accent, prefs.use24h, resumeTicks, shadow = !light)
+            if (prefs.showClock) {
+                val centered = prefs.clockAlign == "center"
+                Box(Modifier.fillMaxWidth(), contentAlignment = if (centered) Alignment.TopCenter else Alignment.TopStart) {
+                    HomeClock(prefs, content, accent, centered, clockActive, shadow = !light)
+                }
+            }
             Spacer(Modifier.weight(1f))
             if (homeApps.isNotEmpty()) {
-                val cellWidth = (prefs.iconSize + 40).dp
+                val columns = fittedColumns(prefs, sidePadding = 36)
+                val cellWidth = ((LocalConfiguration.current.screenWidthDp - 72) / columns).coerceAtMost(prefs.iconSize + 40).dp
                 Column {
-                    homeApps.chunked(prefs.columns).forEach { row ->
+                    homeApps.chunked(columns).forEach { row ->
                         Row {
                             row.forEach { app ->
                                 AppIcon(
@@ -448,7 +481,7 @@ private fun HomeScreen(
                 )
             }
             Spacer(Modifier.height(20.dp))
-            if (dockApps.isNotEmpty()) {
+            if (prefs.showDock && dockApps.isNotEmpty()) {
                 Dock(dockApps, prefs, accent, light, onLaunch, onMenu, Modifier.align(Alignment.CenterHorizontally))
             }
             Spacer(Modifier.height(14.dp))
@@ -463,83 +496,6 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun Clock(color: Color, accent: Color, use24h: Boolean, resumeTicks: Int, shadow: Boolean) {
-    val context = LocalContext.current
-    var now by remember { mutableStateOf(LocalDateTime.now()) }
-    LaunchedEffect(resumeTicks) { now = LocalDateTime.now() }
-    DisposableEffect(Unit) {
-        val receiver = object : BroadcastReceiver() {
-            override fun onReceive(c: Context?, i: Intent?) {
-                now = LocalDateTime.now()
-            }
-        }
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_TIME_TICK)
-            addAction(Intent.ACTION_TIME_CHANGED)
-            addAction(Intent.ACTION_TIMEZONE_CHANGED)
-        }
-        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
-        onDispose { context.unregisterReceiver(receiver) }
-    }
-
-    val textShadow = if (shadow) Shadow(Color(0x55000000), Offset(0f, 3f), 18f) else null
-    val time = now.format(DateTimeFormatter.ofPattern(if (use24h) "HH:mm" else "h:mm"))
-    val period = if (use24h) null else now.format(DateTimeFormatter.ofPattern("a"))
-    val date = now.format(DateTimeFormatter.ofPattern("EEEE, d MMMM"))
-    val greeting = when (now.hour) {
-        in 5..11 -> "Good morning"
-        in 12..16 -> "Good afternoon"
-        in 17..21 -> "Good evening"
-        else -> "Good night"
-    }
-
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.size(8.dp).background(accent, CircleShape))
-            Text(
-                greeting.uppercase(),
-                color = color.copy(alpha = 0.82f),
-                fontFamily = Outfit,
-                fontWeight = FontWeight.Medium,
-                fontSize = 13.sp,
-                letterSpacing = 2.sp,
-                style = TextStyle(shadow = textShadow),
-            )
-        }
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                time,
-                color = color,
-                fontFamily = Outfit,
-                fontWeight = FontWeight.ExtraLight,
-                fontSize = 104.sp,
-                letterSpacing = (-3).sp,
-                style = TextStyle(shadow = textShadow),
-            )
-            if (period != null) {
-                Text(
-                    period,
-                    color = color.copy(alpha = 0.8f),
-                    fontFamily = Outfit,
-                    fontWeight = FontWeight.Light,
-                    fontSize = 22.sp,
-                    style = TextStyle(shadow = textShadow),
-                    modifier = Modifier.padding(start = 10.dp, bottom = 22.dp),
-                )
-            }
-        }
-        Text(
-            date,
-            color = color.copy(alpha = 0.9f),
-            fontFamily = Outfit,
-            fontWeight = FontWeight.Normal,
-            fontSize = 20.sp,
-            style = TextStyle(shadow = textShadow),
-        )
-    }
-}
-
-@Composable
 private fun Dock(
     apps: List<AppEntry>,
     prefs: LauncherPrefs,
@@ -550,6 +506,9 @@ private fun Dock(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(30.dp)
+    // Shrink dock icons when they would not fit across the screen (home padding 72dp, dock padding 32dp, 18dp gaps).
+    val available = LocalConfiguration.current.screenWidthDp - 72 - 32 - 18 * (apps.size - 1)
+    val iconSize = minOf(prefs.iconSize, available / apps.size.coerceAtLeast(1)).dp
     Row(
         modifier
             .background(if (light) Color(0x66FFFFFF) else Color(0x2EFFFFFF), shape)
@@ -567,6 +526,7 @@ private fun Dock(
                 elevated = true,
                 onClick = { onLaunch(app, it) },
                 onLongClick = { onMenu(app) },
+                iconSize = iconSize,
             )
         }
     }
@@ -590,6 +550,7 @@ fun AppIcon(
     onClick: (Rect?) -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
+    iconSize: Dp = prefs.iconSize.dp,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -620,7 +581,7 @@ fun AppIcon(
     ) {
         Box(
             Modifier
-                .size(prefs.iconSize.dp)
+                .size(iconSize)
                 .onGloballyPositioned { holder.coords = it }
                 .graphicsLayer {
                     scaleX = scale
@@ -650,7 +611,7 @@ fun AppIcon(
                 style = TextStyle(
                     shadow = if (elevated && labelColor == Color.White) Shadow(Color(0x66000000), Offset(0f, 1f), 6f) else null
                 ),
-                modifier = Modifier.padding(top = 6.dp).widthIn(max = (prefs.iconSize + 30).dp),
+                modifier = Modifier.padding(top = 6.dp).widthIn(max = iconSize + 30.dp),
             )
         }
     }
@@ -676,7 +637,7 @@ private fun AppDrawer(
         else apps.filter { it.label.contains(trimmed, ignoreCase = true) }
             .sortedBy { !it.label.startsWith(trimmed, ignoreCase = true) }
     }
-    val columns = prefs.columns
+    val columns = fittedColumns(prefs, sidePadding = 16)
     val motionOff = prefs.motion == "off"
     val gridState = rememberLazyGridState()
     LaunchedEffect(trimmed) { gridState.scrollToItem(0) }
@@ -844,9 +805,12 @@ private fun MenuCard(
     val inHome = app.key in prefs.home
     val inDock = app.key in prefs.dock
     val homeLimit = prefs.columns * 3
+    var renaming by remember(app.key) { mutableStateOf(false) }
+    var draft by remember(app.key) { mutableStateOf(app.label) }
     Column(
         Modifier
             .windowInsetsPadding(WindowInsets.systemBars)
+            .imePadding()
             .padding(16.dp)
             .widthIn(max = 520.dp)
             .fillMaxWidth()
@@ -871,6 +835,38 @@ private fun MenuCard(
             }
         }
         Spacer(Modifier.height(14.dp))
+        if (renaming) {
+            BasicTextField(
+                value = draft,
+                onValueChange = { draft = it.take(40) },
+                singleLine = true,
+                textStyle = TextStyle(color = Lagoon.Text, fontSize = 17.sp),
+                cursorBrush = SolidColor(accent),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    prefs.rename(app.key, draft)
+                    onDismiss()
+                }),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .background(Lagoon.Surface, RoundedCornerShape(16.dp))
+                    .border(1.dp, accent.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 16.dp),
+                decorationBox = { inner -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) { inner() } },
+            )
+            Spacer(Modifier.height(8.dp))
+            MenuRow(Icons.Rounded.Check, "Save name", accent) {
+                prefs.rename(app.key, draft)
+                onDismiss()
+            }
+            MenuRow(Icons.Rounded.Refresh, "Use the app's own name", accent) {
+                prefs.rename(app.key, null)
+                onDismiss()
+            }
+            return@Column
+        }
+        MenuRow(Icons.Rounded.Create, "Rename", accent) { renaming = true }
         MenuRow(
             Icons.Rounded.Home,
             when {
