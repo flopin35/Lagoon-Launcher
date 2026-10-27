@@ -26,6 +26,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         prefs = LauncherPrefs(this)
         repo = AppRepository(applicationContext).also { it.start() }
+        Torch.init(this)
+        LockService.sync(this, prefs.lagoonLock)
         setContent { LagoonApp(repo, prefs, homeEvents.intValue, resumeTicks.intValue, visible.value) }
     }
 

@@ -70,7 +70,16 @@ val clockStyles = listOf(
  * second hand costs nothing when Lagoon is hidden behind another app.
  */
 @Composable
-fun HomeClock(prefs: LauncherPrefs, color: Color, accent: Color, centered: Boolean, active: Boolean, shadow: Boolean) {
+fun HomeClock(
+    prefs: LauncherPrefs,
+    color: Color,
+    accent: Color,
+    centered: Boolean,
+    active: Boolean,
+    shadow: Boolean,
+    scaleOverride: Float? = null,
+    stackedOverride: Boolean? = null,
+) {
     var now by remember { mutableStateOf(LocalDateTime.now()) }
     LaunchedEffect(active) {
         now = LocalDateTime.now()
@@ -81,7 +90,7 @@ fun HomeClock(prefs: LauncherPrefs, color: Color, accent: Color, centered: Boole
     }
 
     val textShadow = if (shadow) Shadow(Color(0x55000000), Offset(0f, 3f), 18f) else null
-    val scale = when (prefs.clockSize) {
+    val scale = scaleOverride ?: when (prefs.clockSize) {
         "small" -> 0.62f
         "medium" -> 0.8f
         else -> 1f
@@ -125,7 +134,7 @@ fun HomeClock(prefs: LauncherPrefs, color: Color, accent: Color, centered: Boole
     }
 
     // Side by side on a tablet, stacked on a narrow screen or when centred.
-    if (centered || LocalConfiguration.current.screenWidthDp < 600) {
+    if (stackedOverride ?: (centered || LocalConfiguration.current.screenWidthDp < 600)) {
         Column(horizontalAlignment = align, verticalArrangement = Arrangement.spacedBy(18.dp)) {
             face()
             caption()

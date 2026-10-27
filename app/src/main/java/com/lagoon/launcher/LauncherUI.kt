@@ -82,6 +82,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -93,6 +94,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -179,6 +182,13 @@ private fun LauncherRoot(
     var menuApp by remember { mutableStateOf<AppEntry?>(null) }
     var settingsOpen by remember { mutableStateOf(false) }
     val drawerOpen by remember { derivedStateOf { progress > 0.5f } }
+    // 0 = closed, 1 = the Lagoon control centre fully pulled down
+    var shade by remember { mutableFloatStateOf(0f) }
+    var shadeJob by remember { mutableStateOf<Job?>(null) }
+    val shadeOpen by remember { derivedStateOf { shade > 0.5f } }
+    var searchFocus by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(resumeTicks, prefs.weatherLat, prefs.tempUnit) { WeatherHub.refresh(prefs) }
 
     val hidden = remember(prefs.hidden) { prefs.hidden.toSet() }
     val renames = remember(prefs.renames) { prefs.renameMap() }
@@ -212,7 +222,7 @@ private fun LauncherRoot(
     }
 
     val lightWallpaper = presetById(prefs.wallpaper)?.light == true
-    val lightBars = lightWallpaper && !drawerOpen && !settingsOpen && menuApp == null
+    val lightBars = lightWallpaper && !drawerOpen && !shadeOpen && !settingsOpen && menuApp == null
     SideEffect {
         activity?.window?.let { window ->
             WindowCompat.getInsetsController(window, view).apply {
@@ -241,6 +251,28 @@ private fun LauncherRoot(
             }
         }
 
+        fun animateShade(target: Float, velocity: Float = 0f) {
+            shadeJob?.cancel()
+            shadeJob = scope.launch {
+                when (prefs.motion) {
+                    "off" -> shade = target
+                    "lively" -> animate(shade, target, velocity, spring(dampingRatio = 0.82f, stiffness = 420f)) { v, _ -> shade = v }
+                    else -> animate(shade, target, velocity, spring(dampingRatio = 1f, stiffness = 260f)) { v, _ -> shade = v }
+                }
+            }
+        }
+
+        // velocityY is in px/s, positive when the finger moves down
+        fun settleShade(velocityY: Float) {
+            val target = when {
+                velocityY > 800f -> 1f
+                velocityY < -800f -> 0f
+                shade > 0.4f -> 1f
+                else -> 0f
+            }
+            animateShade(target, velocityY / heightPx)
+        }
+
         // velocityY is in px/s, positive when the finger moves down
         fun settle(velocityY: Float) {
             val target = when {
@@ -260,6 +292,11 @@ private fun LauncherRoot(
                 ActivityOptions.makeScaleUpAnimation(view, it.left, it.top, it.width(), it.height()).toBundle()
             }
             repo.launch(app, rect, options)
+            if (shade > 0f) scope.launch {
+                delay(450)
+                shadeJob?.cancel()
+                shade = 0f
+            }
             if (progress > 0f) scope.launch {
                 delay(450)
                 settleJob?.cancel()
@@ -272,44 +309,152 @@ private fun LauncherRoot(
         LaunchedEffect(homeEvents) {
             if (homeEvents > 0) {
                 menuApp = null
-                if (settingsOpen) settingsOpen = false else animateDrawer(0f)
+                when {
+                    settingsOpen -> settingsOpen = false
+                    shade > 0f -> animateShade(0f)
+                    else -> animateDrawer(0f)
+                }
             }
+        }
+
+        // Shortcuts for the dashboard's notification tile and search button.
+        fun openShade() {
+            if (progress > 0f) animateDrawer(0f)
+            animateShade(1f)
+        }
+
+        fun openSearch() {
+            animateDrawer(1f)
+            searchFocus++
         }
 
         BackHandler {
             when {
                 menuApp != null -> menuApp = null
                 settingsOpen -> settingsOpen = false
+                shade > 0f -> animateShade(0f)
                 progress > 0f -> animateDrawer(0f)
             }
         }
 
-        // Drags that no child consumed: swipe up for apps, down for notifications, and
-        // dragging the drawer's header to close it. Positions are read here at the root,
-        // which never moves, so the drawer tracks the finger exactly.
+        // Drags that no child consumed: swipe up for apps, down for the control centre (or
+        // the system shade), and dragging either panel's edge to put it away. Positions are
+        // read here at the root, which never moves, so panels track the finger exactly.
         val dragModifier = Modifier.pointerInput(heightPx) {
             val tracker = VelocityTracker()
             var total = 0f
+            // Which panel this drag moves: 0 not decided yet, 1 app drawer, 2 control centre, 3 system shade.
+            var target = 0
             detectVerticalDragGestures(
                 onDragStart = {
                     tracker.resetTracking()
                     total = 0f
+                    target = when {
+                        shade > 0f -> 2
+                        progress > 0f -> 1
+                        else -> 0
+                    }
                     settleJob?.cancel()
+                    shadeJob?.cancel()
                 },
                 onDragEnd = {
                     if (settingsOpen || menuApp != null) return@detectVerticalDragGestures
                     val velocity = tracker.calculateVelocity().y
-                    if (progress == 0f && total > 48.dp.toPx()) expandNotifications(context) else settle(velocity)
+                    when (target) {
+                        1 -> settle(velocity)
+                        2 -> settleShade(velocity)
+                        3 -> if (total > 48.dp.toPx()) expandNotifications(context)
+                    }
                 },
-                onDragCancel = { if (!settingsOpen && menuApp == null) settle(0f) },
+                onDragCancel = {
+                    if (target == 1) settle(0f)
+                    if (target == 2) settleShade(0f)
+                },
                 onVerticalDrag = { change, dy ->
                     if (settingsOpen || menuApp != null) return@detectVerticalDragGestures
                     tracker.addPosition(change.uptimeMillis, change.position)
                     total += dy
-                    if (progress > 0f || dy < 0f) progress = (progress - dy / heightPx).coerceIn(0f, 1f)
+                    if (target == 0) target = if (dy < 0f) 1 else if (prefs.swipeDown == "panel") 2 else 3
+                    when (target) {
+                        1 -> progress = (progress - dy / heightPx).coerceIn(0f, 1f)
+                        2 -> shade = (shade + dy / heightPx).coerceIn(0f, 1f)
+                    }
                     change.consume()
                 },
             )
+        }
+
+        // The narrow dashboard scrolls; once it can't scroll further, the same swipe keeps
+        // going into the app drawer (up) or the control centre (down).
+        val homeScroll = remember(heightPx) {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (source != NestedScrollSource.UserInput) return Offset.Zero
+                    if (progress > 0f && progress < 1f) {
+                        progress = (progress - available.y / heightPx).coerceIn(0f, 1f)
+                        return Offset(0f, available.y)
+                    }
+                    if (shade > 0f && shade < 1f) {
+                        shade = (shade + available.y / heightPx).coerceIn(0f, 1f)
+                        return Offset(0f, available.y)
+                    }
+                    return Offset.Zero
+                }
+
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                    if (source != NestedScrollSource.UserInput) return Offset.Zero
+                    if (available.y < 0f && shade == 0f) {
+                        settleJob?.cancel()
+                        progress = (progress - available.y / heightPx).coerceIn(0f, 1f)
+                        return Offset(0f, available.y)
+                    }
+                    if (available.y > 0f && progress == 0f && prefs.swipeDown == "panel") {
+                        shadeJob?.cancel()
+                        shade = (shade + available.y / heightPx).coerceIn(0f, 1f)
+                        return Offset(0f, available.y)
+                    }
+                    return Offset.Zero
+                }
+
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    if (progress > 0f && progress < 1f) {
+                        settle(available.y)
+                        return available
+                    }
+                    if (shade > 0f && shade < 1f) {
+                        settleShade(available.y)
+                        return available
+                    }
+                    return Velocity.Zero
+                }
+            }
+        }
+
+        // A quick upward fling on the notification list, once it is at the bottom, closes the control centre.
+        val shadeScroll = remember(heightPx) {
+            object : NestedScrollConnection {
+                var push = 0f
+
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (available.y > 0f) push = 0f
+                    return Offset.Zero
+                }
+
+                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                    if (source == NestedScrollSource.UserInput && available.y < 0f) push -= available.y
+                    return Offset.Zero
+                }
+
+                override suspend fun onPreFling(available: Velocity): Velocity {
+                    val close = push > with(density) { 56.dp.toPx() } || (push > 0f && available.y < -1200f)
+                    push = 0f
+                    if (close) {
+                        animateShade(0f, available.y / heightPx)
+                        return available
+                    }
+                    return Velocity.Zero
+                }
+            }
         }
 
         // Pulling down on the app list once it is scrolled to the top closes the drawer.
@@ -345,7 +490,7 @@ private fun LauncherRoot(
                 prefs.wallpaper,
                 prefs.wallpaperVersion,
                 Modifier.graphicsLayer {
-                    val s = 1f + 0.05f * progress.coerceIn(0f, 1f)
+                    val s = 1f + 0.05f * maxOf(progress, shade).coerceIn(0f, 1f)
                     scaleX = s
                     scaleY = s
                 },
@@ -353,27 +498,27 @@ private fun LauncherRoot(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .graphicsLayer { alpha = progress.coerceIn(0f, 1f) }
+                    .graphicsLayer { alpha = maxOf(progress, shade).coerceIn(0f, 1f) }
                     .background(Color(0x66000000))
             )
 
+            // Only fades: moving or scaling it would throw off the dashboard's scroll tracking.
             HomeScreen(
                 prefs = prefs,
                 accent = accent,
                 homeApps = homeApps,
                 dockApps = dockApps,
                 light = lightWallpaper,
-                clockActive = appVisible && !drawerOpen && !settingsOpen,
+                clockActive = appVisible && !drawerOpen && !shadeOpen && !settingsOpen,
+                resumeTicks = resumeTicks,
+                homeScroll = homeScroll,
                 onLaunch = ::openApp,
                 onMenu = { menuApp = it },
                 onOpenSettings = { settingsOpen = true },
+                onOpenShade = ::openShade,
+                onOpenSearch = ::openSearch,
                 modifier = Modifier.graphicsLayer {
-                    val p = progress.coerceIn(0f, 1f)
-                    alpha = (1f - p * 1.6f).coerceIn(0f, 1f)
-                    translationY = -p * 48.dp.toPx()
-                    val s = 1f - 0.04f * p
-                    scaleX = s
-                    scaleY = s
+                    alpha = (1f - maxOf(progress, shade).coerceIn(0f, 1f) * 1.6f).coerceIn(0f, 1f)
                 },
             )
 
@@ -384,12 +529,29 @@ private fun LauncherRoot(
                 prefs = prefs,
                 accent = accent,
                 progress = { progress },
+                focusRequest = searchFocus,
                 nestedScroll = drawerScroll,
                 onLaunch = ::openApp,
                 onMenu = { menuApp = it },
                 onOpenSettings = { settingsOpen = true },
                 modifier = Modifier.graphicsLayer {
                     translationY = (1f - progress).coerceAtLeast(0f) * heightPx
+                },
+            )
+
+            ControlCenter(
+                prefs = prefs,
+                accent = accent,
+                resumeTicks = resumeTicks,
+                open = shadeOpen && appVisible,
+                onClose = { animateShade(0f) },
+                onOpenSettings = {
+                    animateShade(0f)
+                    settingsOpen = true
+                },
+                listScroll = shadeScroll,
+                modifier = Modifier.graphicsLayer {
+                    translationY = -(1f - shade).coerceAtLeast(0f) * heightPx
                 },
             )
 
@@ -429,28 +591,46 @@ private fun HomeScreen(
     dockApps: List<AppEntry>,
     light: Boolean,
     clockActive: Boolean,
+    resumeTicks: Int,
+    homeScroll: NestedScrollConnection,
     onLaunch: (AppEntry, Rect?) -> Unit,
     onMenu: (AppEntry) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenShade: () -> Unit,
+    onOpenSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val content = if (light) Lagoon.Ink else Color.White
     val openSettings by rememberUpdatedState(onOpenSettings)
+    val dashboard = prefs.homeLayout == "dashboard"
     Box(modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onLongPress = { openSettings() }) }) {
         Column(
             Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.systemBars)
-                .padding(horizontal = 36.dp, vertical = 20.dp)
+                .padding(horizontal = if (dashboard) 20.dp else 36.dp, vertical = if (dashboard) 14.dp else 20.dp)
         ) {
-            if (prefs.showClock) {
+            if (dashboard) {
+                Dashboard(
+                    prefs = prefs,
+                    accent = accent,
+                    active = clockActive,
+                    resumeTicks = resumeTicks,
+                    onOpenShade = onOpenShade,
+                    onOpenSearch = onOpenSearch,
+                    onOpenSettings = onOpenSettings,
+                    nestedScroll = homeScroll,
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                )
+            } else if (prefs.showClock) {
                 val centered = prefs.clockAlign == "center"
                 Box(Modifier.fillMaxWidth(), contentAlignment = if (centered) Alignment.TopCenter else Alignment.TopStart) {
                     HomeClock(prefs, content, accent, centered, clockActive, shadow = !light)
                 }
             }
-            Spacer(Modifier.weight(1f))
-            if (homeApps.isNotEmpty()) {
+            // On the dashboard the tiles fill this space and pinned apps live in the dock.
+            if (!dashboard) Spacer(Modifier.weight(1f))
+            if (!dashboard && homeApps.isNotEmpty()) {
                 val columns = fittedColumns(prefs, sidePadding = 36)
                 val cellWidth = ((LocalConfiguration.current.screenWidthDp - 72) / columns).coerceAtMost(prefs.iconSize + 40).dp
                 Column {
@@ -472,7 +652,7 @@ private fun HomeScreen(
                         }
                     }
                 }
-            } else if (dockApps.isNotEmpty()) {
+            } else if (!dashboard && dockApps.isNotEmpty()) {
                 Text(
                     "Swipe up for all apps. Long-press one to pin it here.",
                     color = content.copy(alpha = 0.7f),
@@ -480,11 +660,11 @@ private fun HomeScreen(
                     style = TextStyle(shadow = if (light) null else Shadow(Color(0x40000000), Offset(0f, 2f), 10f)),
                 )
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(if (dashboard) 12.dp else 20.dp))
             if (prefs.showDock && dockApps.isNotEmpty()) {
                 Dock(dockApps, prefs, accent, light, onLaunch, onMenu, Modifier.align(Alignment.CenterHorizontally))
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(if (dashboard) 8.dp else 14.dp))
             Box(
                 Modifier
                     .align(Alignment.CenterHorizontally)
@@ -625,12 +805,20 @@ private fun AppDrawer(
     prefs: LauncherPrefs,
     accent: Color,
     progress: () -> Float,
+    focusRequest: Int,
     nestedScroll: NestedScrollConnection,
     onLaunch: (AppEntry, Rect?) -> Unit,
     onMenu: (AppEntry) -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(focusRequest) {
+        if (focusRequest > 0) {
+            delay(250)
+            runCatching { searchFocus.requestFocus() }
+        }
+    }
     val trimmed = query.trim()
     val filtered = remember(apps, trimmed) {
         if (trimmed.isEmpty()) apps
@@ -664,7 +852,7 @@ private fun AppDrawer(
                 onChange = onQueryChange,
                 accent = accent,
                 onGo = { filtered.firstOrNull()?.let { onLaunch(it, null) } },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).focusRequester(searchFocus),
             )
             RoundIconButton(Icons.Rounded.Settings, "Launcher settings", onOpenSettings)
         }

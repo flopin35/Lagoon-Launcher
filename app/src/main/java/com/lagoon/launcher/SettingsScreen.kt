@@ -1,5 +1,6 @@
 package com.lagoon.launcher
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -48,9 +49,19 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -83,6 +94,49 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
         }
     }
     val isDefault = remember(resumeTicks) { isDefaultHome(context) }
+    val notificationsGranted = remember(resumeTicks) { NotificationHub.hasAccess(context) } || NotificationHub.connected
+    val writeSettingsGranted = remember(resumeTicks) { Controls.canWriteSettings(context) }
+    var city by remember { mutableStateOf("") }
+
+    fun applyPlace(place: Place?) {
+        if (place == null) {
+            Toast.makeText(context, "Couldn't find that place. Check the spelling and try again.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        prefs.weatherLat = place.lat
+        prefs.weatherLon = place.lon
+        prefs.weatherPlace = place.name
+        WeatherHub.forget(prefs)
+        scope.launch { WeatherHub.refresh(prefs, force = true) }
+    }
+
+    fun useDeviceLocation() {
+        scope.launch {
+            val place = currentPlace(context)
+            if (place == null) {
+                Toast.makeText(context, "Location is off or unavailable. Type your town instead.", Toast.LENGTH_SHORT).show()
+            } else {
+                applyPlace(place)
+            }
+        }
+    }
+
+    fun searchCity() {
+        if (city.isBlank()) return
+        scope.launch { applyPlace(WeatherHub.searchCity(city)) }
+    }
+
+    fun setUnit(unit: String) {
+        if (prefs.tempUnit == unit) return
+        prefs.tempUnit = unit
+        WeatherHub.forget(prefs)
+        scope.launch { WeatherHub.refresh(prefs, force = true) }
+    }
+
+    val locationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) useDeviceLocation()
+        else Toast.makeText(context, "Without location, type your town to get the weather.", Toast.LENGTH_SHORT).show()
+    }
     val hiddenApps = apps.filter { it.key in prefs.hidden }
     val previewApps = apps.take(5)
 
@@ -109,6 +163,105 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
             Column(Modifier.widthIn(max = 760.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(28.dp)) {
                 if (!isDefault) DefaultHomeCard(accent) { openHomeSettings(context) }
 
+                Section("Home screen", accent) {
+                    Label("Layout")
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Chip("Dashboard", prefs.homeLayout == "dashboard", accent, { prefs.homeLayout = "dashboard" })
+                        Chip("Classic", prefs.homeLayout == "classic", accent, { prefs.homeLayout = "classic" })
+                    }
+                    Text(
+                        if (prefs.homeLayout == "dashboard") "Glass tiles for the clock, weather, music, controls, battery, calendar and notifications."
+                        else "A clean wallpaper with the clock, your pinned apps and the dock.",
+                        color = Lagoon.Muted,
+                        fontSize = 13.sp,
+                    )
+                    Label("Swipe down opens")
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Chip("Lagoon control centre", prefs.swipeDown == "panel", accent, { prefs.swipeDown = "panel" })
+                        Chip("System shade", prefs.swipeDown == "system", accent, { prefs.swipeDown = "system" })
+                    }
+                }
+
+                Section("Lagoon lock screen", accent) {
+                    SwitchRow(
+                        "Show the Lagoon lock screen",
+                        "Clock, weather, music and notifications each time you wake your device. Swipe up, then your PIN or pattern as usual.",
+                        prefs.lagoonLock,
+                        accent,
+                    ) {
+                        prefs.lagoonLock = it
+                        LockService.sync(context, it)
+                    }
+                    Chip("Preview lock screen", false, accent, {
+                        runCatching { context.startActivity(Intent(context, LockActivity::class.java)) }
+                    })
+                    if (prefs.lagoonLock) {
+                        Text(
+                            "Android shows a small \"Lagoon lock screen is on\" notification while this runs. On Huawei, also allow Lagoon under Settings › Battery › App launch so it isn't closed.",
+                            color = Lagoon.Muted,
+                            fontSize = 13.sp,
+                        )
+                    }
+                }
+
+                Section("Weather", accent) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(prefs.weatherPlace.ifBlank { "No location set" }, color = Lagoon.Text, fontSize = 16.sp)
+                            Text("Forecasts from Open-Meteo", color = Lagoon.Muted, fontSize = 13.sp)
+                        }
+                        Chip("Use my location", false, accent, {
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                                useDeviceLocation()
+                            } else {
+                                locationPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+                            }
+                        })
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        BasicTextField(
+                            value = city,
+                            onValueChange = { city = it.take(60) },
+                            singleLine = true,
+                            textStyle = TextStyle(color = Lagoon.Text, fontSize = 16.sp),
+                            cursorBrush = SolidColor(accent),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = { searchCity() }),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .background(Lagoon.SurfaceHigh, CircleShape)
+                                .padding(horizontal = 18.dp),
+                            decorationBox = { inner ->
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                                    if (city.isEmpty()) Text("Type your town, e.g. Accra", color = Lagoon.Muted, fontSize = 16.sp)
+                                    inner()
+                                }
+                            },
+                        )
+                        Chip("Search", false, accent, { searchCity() })
+                    }
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Chip("°C", prefs.tempUnit == "c", accent, { setUnit("c") })
+                        Chip("°F", prefs.tempUnit == "f", accent, { setUnit("f") })
+                    }
+                }
+
+                Section("Permissions", accent) {
+                    PermissionRow(
+                        "Notification access",
+                        "Notifications in the control centre and lock screen, and music controls",
+                        notificationsGranted,
+                        accent,
+                    ) { NotificationHub.openAccessSettings(context) }
+                    PermissionRow(
+                        "Change system settings",
+                        "Brightness and auto-rotate from the control centre",
+                        writeSettingsGranted,
+                        accent,
+                    ) { Controls.requestWriteSettings(context) }
+                }
+
                 Section("Wallpaper", accent) {
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                         wallpaperPresets.forEach { preset ->
@@ -131,7 +284,7 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
                             }
                         }
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (prefs.wallpaper != "system") {
                             Chip("Use on lock screen too", false, accent, {
                                 scope.launch {
@@ -152,19 +305,19 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
 
                 Section("Clock", accent) {
                     Label("Style")
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         clockStyles.forEach { style ->
                             Chip(style.name, prefs.clockStyle == style.id, accent, { prefs.clockStyle = style.id })
                         }
                     }
                     Label("Size")
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Chip("Small", prefs.clockSize == "small", accent, { prefs.clockSize = "small" })
                         Chip("Medium", prefs.clockSize == "medium", accent, { prefs.clockSize = "medium" })
                         Chip("Large", prefs.clockSize == "large", accent, { prefs.clockSize = "large" })
                     }
                     Label("Position")
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Chip("Left", prefs.clockAlign == "start", accent, { prefs.clockAlign = "start" })
                         Chip("Centre", prefs.clockAlign == "center", accent, { prefs.clockAlign = "center" })
                     }
@@ -217,7 +370,7 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
                         }
                     }
                     Label("Style")
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Chip("Colour", prefs.iconStyle == "colour", accent, { prefs.iconStyle = "colour" })
                         Chip("Mono tint", prefs.iconStyle == "mono", accent, { prefs.iconStyle = "mono" })
                     }
@@ -262,7 +415,7 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
                 }
 
                 Section("Motion", accent) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Chip("Off", prefs.motion == "off", accent, { prefs.motion = "off" })
                         Chip("Gentle", prefs.motion == "gentle", accent, { prefs.motion = "gentle" })
                         Chip("Lively", prefs.motion == "lively", accent, { prefs.motion = "lively" })
@@ -313,7 +466,7 @@ fun SettingsScreen(prefs: LauncherPrefs, apps: List<AppEntry>, accent: Color, re
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    Text("Lagoon 1.0.1",color = Lagoon.Muted, fontFamily = Outfit, fontSize = 14.sp)
+                    Text("Lagoon 2.0", color = Lagoon.Muted, fontFamily = Outfit, fontSize = 14.sp)
                     Text(
                         if (isDefault) "Lagoon is your home screen · ${apps.size} apps" else "${apps.size} apps installed",
                         color = Lagoon.Muted.copy(alpha = 0.7f),
@@ -353,6 +506,24 @@ private fun DefaultHomeCard(accent: Color, onOpen: () -> Unit) {
                 .clickable(onClick = onOpen)
                 .padding(horizontal = 20.dp, vertical = 10.dp),
         )
+    }
+}
+
+@Composable
+private fun PermissionRow(title: String, subtitle: String, granted: Boolean, accent: Color, onAllow: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = Lagoon.Text, fontSize = 16.sp)
+            Text(subtitle, color = Lagoon.Muted, fontSize = 13.sp)
+        }
+        if (granted) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Rounded.Check, null, tint = accent, modifier = Modifier.size(18.dp))
+                Text("Allowed", color = accent, fontSize = 14.sp)
+            }
+        } else {
+            Chip("Allow", false, accent, onAllow)
+        }
     }
 }
 

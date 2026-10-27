@@ -2,7 +2,10 @@
 
 A calm turquoise home screen for Android tablets, built with Kotlin and Jetpack Compose.
 
-- Home screen with clock, greeting, pinned apps and a floating dock
+- Dashboard home with glass tiles: clock, weather, music, controls, battery, calendar, notifications
+- Lagoon control centre on swipe down: quick switches, brightness, volume, music and notifications
+- Optional Lagoon lock screen shown over the system lock
+- Classic home with clock, greeting, pinned apps and a floating dock
 - Swipe up for the app list (loaded live from installed apps, with search)
 - Swipe down for notifications, long-press the home screen for settings
 - Long-press an app to pin it, add it to the dock, hide it, open App info or uninstall
@@ -13,7 +16,7 @@ A calm turquoise home screen for Android tablets, built with Kotlin and Jetpack 
 
 ## Download site
 
-`site/` is a static page that serves `site/download/LagoonLauncher-v1.0.1.apk`.
+`site/` is a static page that serves `site/download/LagoonLauncher-v2.0.apk`.
 On Vercel, set **Root Directory** to `site` and **Framework Preset** to **Other**.
 
 ## Building
