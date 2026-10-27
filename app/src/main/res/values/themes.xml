@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Lagoon</string>
+
+    <color name="lagoon_deep">#FF03222A</color>
+    <color name="icon_background">#FF073039</color>
+
+    <style name="Theme.Lagoon" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/lagoon_deep</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowShowWallpaper">false</item>
+        <item name="android:colorAccent">#FF2EC4B6</item>
+    </style>
+</resources>
