@@ -49,6 +49,7 @@
   .brand { font: 500 20px/1 var(--display); letter-spacing: .02em; }
   .top-link { margin-left: auto; color: var(--text); text-decoration: none; font: 500 15px var(--display); padding: 8px 16px; border-radius: 999px; border: 1px solid var(--line); }
   .top-link:hover { border-color: var(--turquoise); color: var(--seafoam); }
+  .top-link.second { margin-left: 8px; }
 
   .hero {
     position: relative;
@@ -159,6 +160,17 @@
   .eta-card b { font: 300 26px/1 var(--display); color: var(--seafoam); }
   .eta-card span { color: var(--muted); font-size: 12px; margin-top: 4px; }
 
+  /* Tidefall preview board */
+  .tide-board { justify-self: center; position: relative; width: min(320px, 100%); padding: 16px; border-radius: 28px; background: #062830; box-shadow: 0 30px 80px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.06); }
+  .tb-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+  .tb-grid i { aspect-ratio: 1; border-radius: 22%; background: rgba(255,255,255,.05); }
+  .tb-grid i.t { background: linear-gradient(#5fd6cb, #2EC4B6 55%, #23a095); }
+  .tb-grid i.c { background: linear-gradient(#ffaa98, #FF8A73 55%, #d9705c); }
+  .tb-grid i.y { background: linear-gradient(#f0d58e, #E9C46A 55%, #c4a456); }
+  .tb-grid i.l { background: linear-gradient(#cdc1f5, #B7A6F0 55%, #9888cc); }
+  .tb-grid i.glow { box-shadow: 0 0 0 2px rgba(255,255,255,.7), 0 0 18px rgba(139,227,201,.8); }
+  .tb-pop { position: absolute; left: 50%; top: 58%; transform: translate(-50%, -50%); font: 600 22px var(--display); color: #fff; text-shadow: 0 3px 10px rgba(0,0,0,.6); white-space: nowrap; }
+
   @media (max-width: 820px) {
     .maps-wrap { grid-template-columns: 1fr; gap: 36px; }
     .hero .wrap { grid-template-columns: 1fr; gap: 36px; }
@@ -174,6 +186,7 @@
     <img class="mark" src="icon.svg" alt="">
     <span class="brand">Lagoon</span>
     <a class="top-link" href="#maps">Lagoon Maps</a>
+    <a class="top-link second" href="#tidefall">Tidefall</a>
   </div>
 </header>
 
@@ -287,6 +300,47 @@
           <div class="car"></div>
           <div class="eta-card"><b>5 min</b><span>3.6 km · arrive 19:47</span></div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block maps" id="tidefall">
+    <div class="wrap maps-wrap">
+      <div>
+        <div class="maps-brand">
+          <img src="tidefall-logo.svg" alt="" width="56" height="56">
+          <div>
+            <div class="maps-name">Tidefall</div>
+            <div class="eyebrow">New game</div>
+          </div>
+        </div>
+        <h2>Place blocks. Ride the falling tide.</h2>
+        <p class="sub">A block puzzle made for tablets. Fill rows and columns to clear them; when a row clears, everything above it falls, and falling blocks can finish new lines in a chain reaction.</p>
+        <ul class="maps-list">
+          <li><strong>Chain reactions:</strong> each link multiplies your points, and big ones set off a MEGA COMBO.</li>
+          <li><strong>Special blocks:</strong> bombs, lightning, rainbow and magnet pieces, plus rewinds you earn.</li>
+          <li><strong>Survival:</strong> danger tides turn blocks to stone unless you clear them in time.</li>
+          <li><strong>Daily Tide, Weekly Storm and friend challenges:</strong> everyone gets the same pieces, so it's a fair fight.</li>
+          <li><strong>Upgrades and unlocks:</strong> pick one of three upgrades at milestones, earn XP, unlock themes and block styles.</li>
+        </ul>
+        <div class="cta">
+          <a class="btn" href="download/Tidefall-v1.0.apk" download>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>
+            Download Tidefall
+          </a>
+          <span class="meta">Version 1.0 · <span id="tideSize">160 KB</span> · Android 8 or newer · plays offline</span>
+        </div>
+      </div>
+      <div class="tide-board" aria-label="Preview of a Tidefall board">
+        <div class="tb-grid">
+          <i></i><i></i><i></i><i></i><i></i><i></i>
+          <i></i><i class="y"></i><i></i><i></i><i></i><i></i>
+          <i class="c"></i><i class="y"></i><i class="y"></i><i></i><i class="l"></i><i></i>
+          <i class="c"></i><i class="t"></i><i class="t"></i><i class="t"></i><i class="l"></i><i class="l"></i>
+          <i class="t glow"></i><i class="t glow"></i><i class="t glow"></i><i class="t glow"></i><i class="t glow"></i><i class="t glow"></i>
+          <i class="c"></i><i class="l"></i><i class="y"></i><i class="c"></i><i class="y"></i><i class="l"></i>
+        </div>
+        <div class="tb-pop">CHAIN ×2 · +640</div>
       </div>
     </div>
   </section>

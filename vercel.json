@@ -3,6 +3,7 @@
     { "source": "/", "destination": "/site/index.html" },
     { "source": "/icon.svg", "destination": "/site/icon.svg" },
     { "source": "/maps-logo.svg", "destination": "/site/maps-logo.svg" },
+    { "source": "/tidefall-logo.svg", "destination": "/site/tidefall-logo.svg" },
     { "source": "/download/:file*", "destination": "/site/download/:file*" }
   ],
   "headers": [
